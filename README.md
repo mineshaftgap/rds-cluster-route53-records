@@ -1,6 +1,6 @@
 # rds-cluster-route53-records
-Create Route 53 DNS Entries for VPC peered DB Clusters
-======================================================
+Peered VPC RDS Cluster Route 53 Records
+=======================================
 
 Currently AWS does not allow a VPC in a peered connection to be able to see the internal IP addresses of RDS clusters in the other peered VPC. In order to be able to use the proper read or write instance in a RDS cluster, you would need to target the IP addresses. In a clustered environment this is subject to change during maintenance or failover. 
 
