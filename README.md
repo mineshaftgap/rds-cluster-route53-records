@@ -6,6 +6,13 @@ Currently AWS does not allow a VPC in a peered connection to be able to see the 
 
 This is a crude Node.js program to get the most recent readers and writers in a cluster and will make Route 53 records accordingly
 
+You will need the following:
+* IAM on the Route 53 account that has ability to create Route 53 records
+* IAM on the RDS account that has the ability to describe RDS clusters and instances
+* User on a host in the RDS VPC that can run getent hosts, with an authorized SSH key
+
+It is recommended that you provide all the accounts above with the minimal access needed.
+
 Here is example usage:
 
     node rds-cluster-route53-records.js \
@@ -20,4 +27,4 @@ Here is example usage:
       --rdsregion RDS_REGION \
       --rdscluster rds.cluster.domainname.com \
       --lookuphost ec2.instance.domainname.com \
-      --lookupuser centos \
+      --lookupuser centos
