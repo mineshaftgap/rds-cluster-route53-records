@@ -13,6 +13,10 @@ You will need the following:
 
 It is recommended that you provide all the accounts above with the minimal access needed.
 
+Requirements:
+* Node 0.12+ (child_process.execSync)
+* Commander Module
+
 Here is example usage:
 
     node rds-cluster-route53-records.js \
