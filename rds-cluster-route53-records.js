@@ -38,62 +38,90 @@ function main() {
   if (!program.lookupuser)  throw new Error('--lookupuser required');
 
   rdsAWS.config.update({accessKeyId: program.rdsaccess, secretAccessKey: program.rdssecret, region: program.rdsregion});
-
   rds = new rdsAWS.RDS();
-  
+
+  r53AWS.config.update({accessKeyId: program.r53access, secretAccessKey: program.r53secret});
+  r53 = new r53AWS.Route53();
+
   getDBClustersSummary(function(dbInfo) {
-    r53AWS.config.update({accessKeyId: program.r53access, secretAccessKey: program.r53secret});
-    r53 = new r53AWS.Route53();
+    setRoute53Records(dbInfo, function(changeID) {
+      r53WaitForSync(changeID, function(status) {
+        console.log(changeID + ' - ' + status);
+      })
+    })
+  });
+}
 
-    // setup base params
-    var params = {
-          ChangeBatch: {
-            Changes: []
-          },
-          HostedZoneId: program.r53zoneid
-        };
-
-    if (dbInfo.hasOwnProperty('read')) {
-      for (var i = 0; i < dbInfo.read.length; i++) {
-        params.ChangeBatch.Changes.push({
-          Action: 'UPSERT',
-          ResourceRecordSet: {
-            Name: program.r53readpre + '-' + (i + 1) + '.' + program.r53domain,
-            Type: 'A',
-            TTL: 300,
-            ResourceRecords: [{
-                'Value': dbInfo.read[i].ip
-            }]
-          }
-        });
+// set interval for status
+function r53WaitForSync(changeID, cb) {
+  r53.getChange({Id: changeID}, function(err, data) {
+    if (err) {
+      console.log(err, err.stack); // an error occurred
+    } else {
+      if (data.ChangeInfo.Status == 'PENDING') {
+        console.log(changeID + ' - ' + data.ChangeInfo.Status);
+        setTimeout(function() {
+          r53WaitForSync(changeID, cb);
+        }, 2500);
+      } else {
+        cb(data.ChangeInfo.Status);
       }
-    }
-
-    if (dbInfo.hasOwnProperty('write')) {
-      for (var i = 0; i < dbInfo.write.length; i++) {
-        params.ChangeBatch.Changes.push({
-          Action: 'UPSERT',
-          ResourceRecordSet: {
-            Name: program.r53writepre + '-' + (i + 1) + '.' + program.r53domain,
-            Type: 'A',
-            TTL: 300,
-            ResourceRecords: [{
-                'Value': dbInfo.write[i].ip
-            }]
-          }
-        });
-      }
-    }
-
-    console.log(require('util').inspect(params, {showHidden: false, depth: null}));
-
-    if (params.ChangeBatch.Changes.length > 0) {
-      r53.changeResourceRecordSets(params, function(err, data) {
-        if (err) console.log(err, err.stack); // an error occurred
-        else     console.log(data);           // successful response
-      });
     }
   });
+}
+
+function setRoute53Records(dbInfo, cb) {
+  // setup base params
+  var params = {
+        ChangeBatch: {
+          Changes: []
+        },
+        HostedZoneId: program.r53zoneid
+      };
+
+  if (dbInfo.hasOwnProperty('read')) {
+    for (var i = 0; i < dbInfo.read.length; i++) {
+      params.ChangeBatch.Changes.push({
+        Action: 'UPSERT',
+        ResourceRecordSet: {
+          Name: program.r53readpre + '-' + (i + 1) + '.' + program.r53domain,
+          Type: 'A',
+          TTL: 300,
+          ResourceRecords: [{
+              'Value': dbInfo.read[i].ip
+          }]
+        }
+      });
+    }
+  }
+
+  if (dbInfo.hasOwnProperty('write')) {
+    for (var i = 0; i < dbInfo.write.length; i++) {
+      params.ChangeBatch.Changes.push({
+        Action: 'UPSERT',
+        ResourceRecordSet: {
+          Name: program.r53writepre + '-' + (i + 1) + '.' + program.r53domain,
+          Type: 'A',
+          TTL: 300,
+          ResourceRecords: [{
+              'Value': dbInfo.write[i].ip
+          }]
+        }
+      });
+    }
+  }
+
+  console.log(require('util').inspect(params, {showHidden: false, depth: null}));
+
+  if (params.ChangeBatch.Changes.length > 0) {
+    r53.changeResourceRecordSets(params, function(err, data) {
+      if (err) {
+        console.log(err, err.stack); // an error occurred
+      } else {
+        cb(data.ChangeInfo.Id);
+      }
+    });
+  }
 }
 
 function getDBClustersSummary(cb) {
