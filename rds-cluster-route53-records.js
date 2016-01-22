@@ -155,7 +155,7 @@ function getDBInstancesSummary(rdsInstances, cb) {
 
 function getLocalIPFromHost(address, host, user) {
   // use "getent" which should be available on most linux systems
-  var hostInfo = execSync('ssh ' + user + '@' + host + ' getent hosts "' + address + '"').toString('utf8');
+  var hostInfo = execSync('ssh ' + user + '@' + host + ' getent hosts "' + address + '"', {encoding: 'utf8'});
 
   // crude way to only get the IP address
   return hostInfo.replace(/^((?:[0-9]{1,3}\.){3}[0-9]{1,3}).*\n*/m, '$1');
