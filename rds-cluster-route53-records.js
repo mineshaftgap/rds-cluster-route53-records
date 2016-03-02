@@ -22,6 +22,7 @@ function main() {
   .option('-c, --rdscluster [value]',   'AWS RDS cluster endpoint')
   .option('-l, --lookuphost [value]',   'Host that has proper access/networking to lookup internal IP')
   .option('-u, --lookupuser [value]',   'User that has proper access/networking to lookup internal IP')
+  .option('-n, --nosyncwait',           'Do not wait until DNS servers are INSYNC')
   .parse(process.argv);
 
   if (!program.r53access)   throw new Error('--r53access required');
@@ -45,10 +46,14 @@ function main() {
 
   getDBClustersSummary(function(dbInfo) {
     setRoute53Records(dbInfo, function(changeID) {
-      r53WaitForSync(changeID, function(status) {
-        console.log(changeID + ' - ' + status);
-      })
-    })
+      if (program.nosyncwait) {
+        console.log('Changes sent to Route 53, not waiting for sync: ' + changeID);
+      } else {
+        r53WaitForSync(changeID, function(status) {
+          console.log(changeID + ' - ' + status);
+        });
+      }
+    });
   });
 }
 
