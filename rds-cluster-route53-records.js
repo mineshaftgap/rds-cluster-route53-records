@@ -1,56 +1,80 @@
 "use strict";
 
-// TODO: daemonize/set interval
-// TODO: write/honor PID file to avoic cron colision
-// TODO: optional TTL for DNS records
-// TODO: check existing record and if no chenge needed, don't update
+// TODO - daemonize/set interval
+// TODO - check existing record and if no change needed, don't update
+// throw new Error(require('util').inspect(data.DBInstances[i].Endpoint, {showHidden: false, depth: null}));
+
+var pidfile = '/tmp/rcrr.pid';
+
+// write the PID file to avoid collision
+writePID();
+
+process
+  .on('exit',               exitHandler.bind(null, {cleanup:  true}))   // do something when app is closing
+  .on('SIGINT',             exitHandler.bind(null, {exit:     true}))   // catches ctrl+c event
+  .on('uncaughtException',  exitHandler.bind(null, {exit:     true}));  //catches uncaught exceptions
 
 processConfs(function(confs) {
-  Object.keys(confs).forEach(function(key) {
-    var conf      = confs[key],
-        r53AWS    = require('aws-sdk'),
-        rdsAWS    = require('aws-sdk'),
-        rds, r53;
+  var batch = {};
+  var cconfs  = confs.slice(0); // clone confs
 
-    rdsAWS.config.update({accessKeyId: conf.rdsaccess, secretAccessKey: conf.rdssecret, region: conf.rdsregion});
-    rds = new rdsAWS.RDS();
+  (function addClusterInfo() {
+    var conf = cconfs.splice(0, 1)[0];
 
-    r53AWS.config.update({accessKeyId: conf.r53access, secretAccessKey: conf.r53secret});
-    r53 = new r53AWS.Route53();
+    console.log('\nProccessing Cluster Info for : ' + conf.rdscluster);
 
-    getDBClustersSummary(conf, rds, function(dbInfo) {
-      setRoute53Records(conf, dbInfo, function(changeID) {
-        if (conf.nosyncwait) {
-          console.log('Changes sent to Route 53, not waiting for sync: ' + changeID);
-        } else {
-          r53WaitForSync(changeID, function(status) {
-            console.log(changeID + ' - ' + status);
-          });
-        }
-      });
+    getDBClustersSummary(conf, function(dbInfo) {
+      var nosyncwait = conf.nosyncwait || false,
+          cred = {r53zoneid: conf.r53zoneid, r53access: conf.r53access, r53secret: conf.r53secret, nosyncwait: nosyncwait},
+          cred_uniq = conf.r53zoneid + '-' + conf.r53access + '-' + conf.r53secret + '-' + conf.nosyncwait;
+
+      batch[cred_uniq] = batch[cred_uniq] || {cred: cred, records: []}; // initialize if different 
+
+      // get all the read instances
+      dbInfo.read.forEach(function(info, i) {
+        batch[cred_uniq].records.push({host: info.kind + '-' + (i + 1) + '.' + conf.r53domain, ip: info.ip, ttl: conf.timetolive});
+      })
+
+      // get all the write instances
+      dbInfo.write.forEach(function(info, i) {
+        batch[cred_uniq].records.push({host: info.kind + '-' + (i + 1) + '.' + conf.r53domain, ip: info.ip, ttl: conf.timetolive});
+      })
+
+      // only process once we have everything
+      if (cconfs.length == 0) {
+        // write the r53 records
+        setRoute53Records(batch, function(r53, changeID) {
+          console.log('Done');
+        });
+      } else {
+        addClusterInfo();
+      }
     });
-  });
+  })();
 })
 
 function processConfs(cb) {
   var fs      = require('fs'),
       program = require('commander'),
       cliarg  = process.argv[2],
-      confs   = {},
-      files, found;
+      confs   = [],
+      conf, files;
 
   if (cliarg !== undefined) {
     if (fs.existsSync(cliarg)) {
       if (fs.lstatSync(cliarg).isDirectory()) {
         files = fs.readdirSync(cliarg);
 
+        // aggregate into zone id batches
         for (var i = 0; i < files.length; i++) {
-          if (found = files[i].match(/^(.*)\.json$/)) {
-            confs[found[1]] = require(absPath(cliarg + '/' + files[i]));
+          if (files[i].match(/^(.*)\.json$/)) {
+            conf = require(absPath(cliarg + '/' + files[i]));
+            confs.push(conf);
           }
         }
-      } else if (fs.lstatSync(cliarg).isFile() && (found = cliarg.match(/^(.*)\.json$/))) {
-        confs[found[1]] = require(absPath(cliarg));
+      } else if (fs.lstatSync(cliarg).isFile() && (cliarg.match(/^(.*)\.json$/))) {
+        conf = require(absPath(cliarg));
+        confs.push(conf);
       }
     } else {
       program
@@ -69,24 +93,24 @@ function processConfs(cb) {
         .option('-l, --lookuphost [value]',   'Host that has proper access/networking to lookup internal IP')
         .option('-u, --lookupuser [value]',   'User that has proper access/networking to lookup internal IP')
         .option('-n, --nosyncwait',           'Do not wait until DNS servers are INSYNC')
+        .option('-i, --timetolive',           'DNS time to live')
         .parse(process.argv);
 
-      confs = {
-        'arguments' : {
-          'r53access'   : program.r53access,
-          'r53secret'   : program.r53secret,
-          'r53zoneid'   : program.r53zoneid,
-          'r53domain'   : program.r53domain,
-          'r53readpre'  : program.r53readpre,
-          'r53writepre' : program.r53writepre,
-          'rdsaccess'   : program.rdsaccess,
-          'rdssecret'   : program.rdssecret,
-          'rdsregion'   : program.rdsregion,
-          'rdscluster'  : program.rdscluster,
-          'lookuphost'  : program.lookuphost,
-          'lookupuser'  : program.lookupuser
-        }
-      };
+      confs.push({
+        r53access:   program.r53access,
+        r53secret:   program.r53secret,
+        r53zoneid:   program.r53zoneid,
+        r53domain:   program.r53domain,
+        r53readpre:  program.r53readpre,
+        r53writepre: program.r53writepre,
+        rdsaccess:   program.rdsaccess,
+        rdssecret:   program.rdssecret,
+        rdsregion:   program.rdsregion,
+        rdscluster:  program.rdscluster,
+        lookuphost:  program.lookuphost,
+        lookupuser:  program.lookupuser,
+        timetolive:  program.timetolive
+      });
     }
   }
 
@@ -97,19 +121,19 @@ function processConfs(cb) {
 function checkRequired(confs, cb) {
   var required = ['r53access', 'r53secret', 'r53zoneid', 'r53domain', 'r53readpre', 'r53writepre', 'rdsaccess', 'rdssecret', 'rdsregion', 'rdscluster', 'lookuphost', 'lookupuser'];
 
-  for (var i = 0; i < confs.length; i++) {
-    for (var j = 0; j < required.length; j++) {
-      if (!confs[i].hasOwnProperty[required[j]]) {
-        throw new Error('--' + required[j] + ' missing, it is required');
+  confs.forEach(function(conf) {
+    required.forEach(function(req) {
+      if (!conf[req]) {
+        throw new Error('--' + req + ' missing, it is required');
       }
-    }
-  }
+    });
+  });
 
   cb(confs);
 }
 
 // don't release until DNS is synced
-function r53WaitForSync(changeID, cb) {
+function r53WaitForSync(r53, changeID, cb) {
   r53.getChange({Id: changeID}, function(err, data) {
     if (err) {
       console.log(err, err.stack); // an error occurred
@@ -117,7 +141,7 @@ function r53WaitForSync(changeID, cb) {
       if (data.ChangeInfo.Status == 'PENDING') {
         console.log(changeID + ' - ' + data.ChangeInfo.Status);
         setTimeout(function() {
-          r53WaitForSync(changeID, cb);
+          r53WaitForSync(r53, changeID, cb);
         }, 2500);
       } else {
         cb(data.ChangeInfo.Status);
@@ -126,66 +150,63 @@ function r53WaitForSync(changeID, cb) {
   });
 }
 
+function getAWS(conf) {
+  var aws = require('aws-sdk');
+
+  aws.config.update(conf);
+
+  return aws;
+}
+
 // send a upsert call to enter the DNS records
-function setRoute53Records(conf, dbInfo, cb) {
-  var ttl = conf.ttl && Number.isInteger(conf.ttl) ? conf.ttl : 300;
+function setRoute53Records(batch, cb) {
+  Object.keys(batch).forEach(function(cred_uniq) {
+    var cred    = batch[cred_uniq].cred,
+        records = batch[cred_uniq].records,
+        aws     = getAWS({accessKeyId: cred.r53access, secretAccessKey: cred.r53secret}),
+        r53     = new aws.Route53(),
+        params  = {ChangeBatch: {Changes: []}, HostedZoneId: cred.r53zoneid}; // setup base params
 
-  // setup base params
-  var params = {
-        ChangeBatch: {
-          Changes: []
-        },
-        HostedZoneId: conf.r53zoneid
-      };
-
-  if (dbInfo.hasOwnProperty('read')) {
-    for (var i = 0; i < dbInfo.read.length; i++) {
+    // gather up all the records for the batch
+    records.forEach(function(record) {
       params.ChangeBatch.Changes.push({
         Action: 'UPSERT',
         ResourceRecordSet: {
-          Name: conf.r53readpre + '-' + (i + 1) + '.' + conf.r53domain,
+          Name: record.host,
           Type: 'A',
-          TTL: ttl,
-          ResourceRecords: [{
-              'Value': dbInfo.read[i].ip
-          }]
-        }
-      });
-    }
-  }
-
-  if (dbInfo.hasOwnProperty('write')) {
-    for (var i = 0; i < dbInfo.write.length; i++) {
-      params.ChangeBatch.Changes.push({
-        Action: 'UPSERT',
-        ResourceRecordSet: {
-          Name: conf.r53writepre + '-' + (i + 1) + '.' + conf.r53domain,
-          Type: 'A',
-          TTL: ttl,
-          ResourceRecords: [{
-              'Value': dbInfo.write[i].ip
-          }]
-        }
-      });
-    }
-  }
-
-  console.log(require('util').inspect(params, {showHidden: false, depth: null}));
-
-  if (params.ChangeBatch.Changes.length > 0) {
-    r53.changeResourceRecordSets(params, function(err, data) {
-      if (err) {
-        console.log(err, err.stack); // an error occurred
-      } else {
-        cb(data.ChangeInfo.Id);
-      }
+          TTL: record.ttl,
+          ResourceRecords: [{Value: record.ip}]
+        }        
+      })
     });
-  }
+
+    if (params.ChangeBatch.Changes.length > 0) {
+      r53.changeResourceRecordSets(params, function(err, data) {
+        if (err) {
+          console.log(err, err.stack); // an error occurred
+        } else {
+          if (cred.nosyncwait) {
+            console.log('\nChanges sent to Route 53, not waiting for DNS sync: ' + data.ChangeInfo.Id);
+            cb();
+          } else {
+            console.log('\nSending changes to Route 53, waiting for DNS sync');
+
+            r53WaitForSync(r53, data.ChangeInfo.Id, function(status) {
+              console.log(data.ChangeInfo.Id + ' - ' + status);
+              cb();
+            });
+          }
+        }
+      });
+    }
+  });
 }
 
 // get the overall cluster information
-function getDBClustersSummary(conf, rds, cb) {
-  var rdsInstances = {'read' : [], 'write' : [], 'instances' : []};
+function getDBClustersSummary(conf, cb) {
+  var aws           = getAWS({accessKeyId: conf.rdsaccess, secretAccessKey: conf.rdssecret, region: conf.rdsregion}),
+      rds           = new aws.RDS(),
+      rdsInstances  = {read: [], write: [], instances: []};
 
   rds.describeDBClusters({}, function(err, data) {
     if (err) {
@@ -198,9 +219,11 @@ function getDBClustersSummary(conf, rds, cb) {
               var kind = data.DBClusters[i].DBClusterMembers[j].IsClusterWriter ? 'write' : 'read';
 
               var info = {
-                'name' : data.DBClusters[i].DBClusterMembers[j].DBInstanceIdentifier,
-                'kind' : kind
+                name: data.DBClusters[i].DBClusterMembers[j].DBInstanceIdentifier,
+                kind: kind
               };
+
+              console.log('Cluster ' + kind + ' instance : ' + info.name);
 
               rdsInstances.instances[data.DBClusters[i].DBClusterMembers[j].DBInstanceIdentifier] = info;
 
@@ -230,10 +253,13 @@ function getDBInstancesSummary(conf, rds, rdsInstances, cb) {
           data.DBInstances[i].Endpoint.hasOwnProperty('Address') &&
           rdsInstances.instances.hasOwnProperty(data.DBInstances[i].DBInstanceIdentifier)
         ) {
-          var address = data.DBInstances[i].Endpoint.Address;
+          var host  = data.DBInstances[i].Endpoint.Address,
+              ip    = getLocalIPFromHost(host, conf.lookuphost, conf.lookupuser);
 
-          rdsInstances.instances[data.DBInstances[i].DBInstanceIdentifier].host = address;
-          rdsInstances.instances[data.DBInstances[i].DBInstanceIdentifier].ip = getLocalIPFromHost(address, conf.lookuphost, conf.lookupuser);
+          console.log('Cluster Instance ' + host + ' ip : ' + ip);
+
+          rdsInstances.instances[data.DBInstances[i].DBInstanceIdentifier].host = host;
+          rdsInstances.instances[data.DBInstances[i].DBInstanceIdentifier].ip   = ip;
         }
       }
 
@@ -242,15 +268,50 @@ function getDBInstancesSummary(conf, rds, rdsInstances, cb) {
   });
 }
 
+function exitHandler(options, err) {
+  if (options.cleanup) {
+    removePID();
+  }
+
+  if (err) {
+    console.log(err.stack);
+  }
+
+  if (options.exit) {
+    console.log('User interuption');
+
+    removePID();
+
+    process.exit();
+  }
+}
+
+// unlink
+function removePID() {
+  var fs  = require('fs');
+
+  fs.unlink(pidfile);
+}
+
+function writePID() {
+  var fs  = require('fs'),
+      pid = process.pid,
+      fd  = fs.openSync(pidfile, 'wx');
+
+  fs.writeFileSync(fd, pid.toString());
+
+  fs.closeSync(fd);
+}
+
 // return the path that will work with a require()
 function absPath(filepath) {
   return filepath.match(/^[\/~]/) ? filepath : require('path').join(process.cwd(), filepath);
 }
 
-// function to issue on the host to get a IP for the host
+// function to issue on the host to get a IP for the host, "getent" which should be available on most linux systems
 function getLocalIPFromHost(address, host, user) {
   var execSync  = require('child_process').execSync,
-      hostInfo = execSync('ssh ' + user + '@' + host + ' getent hosts "' + address + '"', {encoding: 'utf8'}); // use "getent" which should be available on most linux systems
+      hostInfo  = execSync('ssh ' + user + '@' + host + ' getent hosts "' + address + '"', {encoding: 'utf8'});
 
   // crude way to only get the IP address
   return hostInfo.replace(/^((?:[0-9]{1,3}\.){3}[0-9]{1,3}).*\n*/m, '$1');
