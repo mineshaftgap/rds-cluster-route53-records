@@ -17,7 +17,7 @@ Requirements:
 * Node 0.12+ (child_process.execSync)
 * Commander Module
 
-Here is example usage:
+Direct command line usage:
 
     node rds-cluster-route53-records.js \
       --r53access R53_ACCESS_KEY_ID \
@@ -32,3 +32,13 @@ Here is example usage:
       --rdscluster rds.cluster.domainname.com \
       --lookuphost ec2.instance.domainname.com \
       --lookupuser centos
+      --nosyncwait
+      --timetolive 60
+
+Config file usage:
+
+    node rds-cluster-route53-records.js domain.json
+
+Config directory usage:
+
+    node rds-cluster-route53-records.js /usr/local/etc/rcrr.d
