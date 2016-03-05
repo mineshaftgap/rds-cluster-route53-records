@@ -35,10 +35,10 @@ Direct command line usage:
       --nosyncwait
       --timetolive 60
 
-Config file usage:
+Config json file usage:
 
     node rds-cluster-route53-records.js domain.json
 
-Config directory usage:
+Config directory (JSON files with .json extention) usage:
 
     node rds-cluster-route53-records.js /usr/local/etc/rcrr.d
