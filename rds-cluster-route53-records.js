@@ -298,7 +298,7 @@ function writePID() {
       pid = process.pid,
       fd  = fs.openSync(pidfile, 'wx');
 
-  fs.writeFileSync(fd, pid.toString());
+  fs.writeFileSync(pidfile, pid.toString());
 
   fs.closeSync(fd);
 }
