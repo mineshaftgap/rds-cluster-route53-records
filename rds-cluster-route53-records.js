@@ -32,12 +32,12 @@ processConfs(function(confs) {
 
       // get all the read instances
       dbInfo.read.forEach(function(info, i) {
-        batch[cred_uniq].records.push({host: info.kind + '-' + (i + 1) + '.' + conf.r53domain, ip: info.ip, ttl: conf.timetolive});
+        batch[cred_uniq].records.push({host: conf.r53readpre + '-' + (i + 1) + '.' + conf.r53domain, ip: info.ip, ttl: conf.timetolive});
       })
 
       // get all the write instances
       dbInfo.write.forEach(function(info, i) {
-        batch[cred_uniq].records.push({host: info.kind + '-' + (i + 1) + '.' + conf.r53domain, ip: info.ip, ttl: conf.timetolive});
+        batch[cred_uniq].records.push({host: conf.r53writepre + '-' + (i + 1) + '.' + conf.r53domain, ip: info.ip, ttl: conf.timetolive});
       })
 
       // only process once we have everything
