@@ -21,33 +21,37 @@ processConfs(function(confs) {
   (function addClusterInfo() {
     var conf = cconfs.splice(0, 1)[0];
 
-    console.log('\nProccessing Cluster Info for : ' + conf.rdscluster);
+    console.log('\nProcessing Cluster Info for : ' + conf.rdscluster);
 
     getDBClustersSummary(conf, function(dbInfo) {
-      var nosyncwait = conf.nosyncwait || false,
-          cred = {r53zoneid: conf.r53zoneid, r53access: conf.r53access, r53secret: conf.r53secret, nosyncwait: nosyncwait},
-          cred_uniq = conf.r53zoneid + '-' + conf.r53access + '-' + conf.r53secret + '-' + conf.nosyncwait;
+      try {
+        var nosyncwait = conf.nosyncwait || false,
+            cred = {r53zoneid: conf.r53zoneid, r53access: conf.r53access, r53secret: conf.r53secret, nosyncwait: nosyncwait},
+            cred_uniq = conf.r53zoneid + '-' + conf.r53access + '-' + conf.r53secret + '-' + conf.nosyncwait;
 
-      batch[cred_uniq] = batch[cred_uniq] || {cred: cred, records: []}; // initialize if different 
+        batch[cred_uniq] = batch[cred_uniq] || {cred: cred, records: []}; // initialize if different
 
-      // get all the read instances
-      dbInfo.read.forEach(function(info, i) {
-        batch[cred_uniq].records.push({host: conf.r53readpre + '-' + (i + 1) + '.' + conf.r53domain, ip: info.ip, ttl: conf.timetolive});
-      })
+        // get all the read instances
+        dbInfo.read.forEach(function(info, i) {
+          batch[cred_uniq].records.push({host: conf.r53readpre + '-' + (i + 1) + '.' + conf.r53domain, ip: info.ip, ttl: conf.timetolive});
+        })
 
-      // get all the write instances
-      dbInfo.write.forEach(function(info, i) {
-        batch[cred_uniq].records.push({host: conf.r53writepre + '-' + (i + 1) + '.' + conf.r53domain, ip: info.ip, ttl: conf.timetolive});
-      })
+        // get all the write instances
+        dbInfo.write.forEach(function(info, i) {
+          batch[cred_uniq].records.push({host: conf.r53writepre + '-' + (i + 1) + '.' + conf.r53domain, ip: info.ip, ttl: conf.timetolive});
+        })
 
-      // only process once we have everything
-      if (cconfs.length == 0) {
-        // write the r53 records
-        setRoute53Records(batch, function(r53, changeID) {
-          console.log('Done');
-        });
-      } else {
-        addClusterInfo();
+        // only process once we have everything
+        if (cconfs.length == 0) {
+          // write the r53 records
+          setRoute53Records(batch, function(r53, changeID) {
+            console.log('Done');
+          });
+        } else {
+          addClusterInfo();
+        }
+      } catch (e) {
+        console.error(e);
       }
     });
   })();
@@ -176,7 +180,7 @@ function setRoute53Records(batch, cb) {
           Type: 'A',
           TTL: record.ttl,
           ResourceRecords: [{Value: record.ip}]
-        }        
+        }
       })
     });
 
@@ -311,7 +315,7 @@ function absPath(filepath) {
 // function to issue on the host to get a IP for the host, "getent" which should be available on most linux systems
 function getLocalIPFromHost(address, host, user) {
   var execSync  = require('child_process').execSync,
-      hostInfo  = execSync('ssh ' + user + '@' + host + ' getent hosts "' + address + '"', {encoding: 'utf8'});
+      hostInfo  = execSync('ssh -oUserKnownHostsFile=/dev/null -oStrictHostKeyChecking=no ' + user + '@' + host + ' getent hosts "' + address + '"', {encoding: 'utf8'});
 
   // crude way to only get the IP address
   return hostInfo.replace(/^((?:[0-9]{1,3}\.){3}[0-9]{1,3}).*\n*/m, '$1');
