@@ -33,12 +33,16 @@ processConfs(function(confs) {
 
         // get all the read instances
         dbInfo.read.forEach(function(info, i) {
-          batch[cred_uniq].records.push({host: conf.r53readpre + '-' + (i + 1) + '.' + conf.r53domain, ip: info.ip, ttl: conf.timetolive});
+          if (typeof info.ip !== 'undefined' && typeof info.host !== 'undefined') {
+            batch[cred_uniq].records.push({host: conf.r53readpre + '-' + (i + 1) + '.' + conf.r53domain, ip: info.ip, ttl: conf.timetolive});
+          }
         })
 
         // get all the write instances
         dbInfo.write.forEach(function(info, i) {
-          batch[cred_uniq].records.push({host: conf.r53writepre + '-' + (i + 1) + '.' + conf.r53domain, ip: info.ip, ttl: conf.timetolive});
+          if (typeof info.ip !== 'undefined' && typeof info.host !== 'undefined') {
+            batch[cred_uniq].records.push({host: conf.r53writepre + '-' + (i + 1) + '.' + conf.r53domain, ip: info.ip, ttl: conf.timetolive});
+          }
         })
 
         // only process once we have everything
@@ -258,12 +262,18 @@ function getDBInstancesSummary(conf, rds, rdsInstances, cb) {
           rdsInstances.instances.hasOwnProperty(data.DBInstances[i].DBInstanceIdentifier)
         ) {
           var host  = data.DBInstances[i].Endpoint.Address,
-              ip    = getLocalIPFromHost(host, conf.lookuphost, conf.lookupuser);
+              ip;
 
-          console.log('Cluster Instance ' + host + ' ip : ' + ip);
+          try {
+            ip    = getLocalIPFromHost(host, conf.lookuphost, conf.lookupuser);
 
-          rdsInstances.instances[data.DBInstances[i].DBInstanceIdentifier].host = host;
-          rdsInstances.instances[data.DBInstances[i].DBInstanceIdentifier].ip   = ip;
+            console.log('Cluster Instance ' + host + ' ip : ' + ip);
+
+            rdsInstances.instances[data.DBInstances[i].DBInstanceIdentifier].host = host;
+            rdsInstances.instances[data.DBInstances[i].DBInstanceIdentifier].ip   = ip;
+          } catch (err) {
+            console.error(err);
+          }
         }
       }
 
